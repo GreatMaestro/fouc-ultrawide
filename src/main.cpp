@@ -141,25 +141,56 @@ uintptr_t AspectJumpTable[] = {
 	(uintptr_t)&Aspect329ASM,
 };
 
+// The configuration tool's aspect names, by aspect index. The game's own table stops at 5:4.
+const char* aAspectNames[] = { "4:3", "16:10", "16:9", "5:4", "21:9", "32:9" };
+constexpr double aAspectValues[] = { 4.0 / 3.0, 16.0 / 10.0, 16.0 / 9.0, 5.0 / 4.0, 21.0 / 9.0, 32.0 / 9.0 };
+constexpr int nAspectCount = sizeof(aAspectValues) / sizeof(aAspectValues[0]);
+
 LRESULT __stdcall SendDlgItemMessageAHooked(HWND hDlg, int nIDDlgItem, UINT Msg, WPARAM wParam, LPARAM lParam) {
+	// the aspect combo (1124) is filled with the 4 stock entries, then its selection is set: add ours first
 	if (nIDDlgItem == 1124 && Msg == CB_SETCURSEL) {
-		auto idx = SendDlgItemMessageA(hDlg, 1124, CB_ADDSTRING, 0, (LPARAM)"21:9");
-		SendDlgItemMessageA(hDlg, 1124, CB_SETITEMDATA, idx, 4);
-		idx = SendDlgItemMessageA(hDlg, 1124, CB_ADDSTRING, 0, (LPARAM)"32:9");
-		SendDlgItemMessageA(hDlg, 1124, CB_SETITEMDATA, idx, 5);
+		for (int i = 4; i < nAspectCount; i++) {
+			if (SendDlgItemMessageA(hDlg, 1124, CB_FINDSTRINGEXACT, -1, (LPARAM)aAspectNames[i]) != CB_ERR) continue;
+			auto idx = SendDlgItemMessageA(hDlg, 1124, CB_ADDSTRING, 0, (LPARAM)aAspectNames[i]);
+			SendDlgItemMessageA(hDlg, 1124, CB_SETITEMDATA, idx, i);
+		}
 	}
 	return SendDlgItemMessageA(hDlg, nIDDlgItem, Msg, wParam, lParam);
 }
 auto pSendDlgItemMessageAHooked = &SendDlgItemMessageAHooked;
 
+// Replaces the game's resolution -> aspect index detection (which only knows 4:3 .. 16:9 and picks
+// 16:9 for anything wider): returns the nearest known aspect, so 3440x1440 is 21:9 and 5120x1440 is 32:9.
 int GetAspectRatioForSetup(int x, int y) {
+	if (x <= 0 || y <= 0) return 2;
 	auto aspect = (double)x / (double)y;
-	if (std::abs(aspect - (16.0 / 10.0)) < 0.05) return 1;
-	if (std::abs(aspect - (16.0 / 9.0)) < 0.05) return 2;
-	if (std::abs(aspect - (5.0 / 4.0)) < 0.05) return 3;
-	if (std::abs(aspect - (21.0 / 9.0)) < 0.05) return 4;
-	if (std::abs(aspect - (32.0 / 9.0)) < 0.05) return 5;
-	return 0; // 4:3
+	int best = 0;
+	for (int i = 1; i < nAspectCount; i++) {
+		if (std::abs(aspect - aAspectValues[i]) < std::abs(aspect - aAspectValues[best])) best = i;
+	}
+	return best;
+}
+
+// Display mode list label "%ld x %ld  (%s)": the game falls back to "<unknown>" for index >= 4.
+// Hooked at 0x456066 (mov eax, "<unknown>"), with eax = aspect index; returns to 0x45606B.
+const char* __cdecl GetAspectName(int index) {
+	if (index >= 0 && index < nAspectCount) return aAspectNames[index];
+	return (const char*)0x6DDF68; // "<unknown>"
+}
+uintptr_t AspectLabelASM_jmp = 0x45606B;
+void __attribute__((naked)) AspectLabelASM() {
+	__asm__ (
+		"push ecx\n\t"
+		"push edx\n\t"
+		"push eax\n\t"
+		"call %1\n\t"
+		"add esp, 4\n\t"
+		"pop edx\n\t"
+		"pop ecx\n\t"
+		"jmp %0\n\t"
+			:
+			: "m" (AspectLabelASM_jmp), "i" (GetAspectName)
+	);
 }
 
 // ---- 3D camera: Hor+ frustum ----
@@ -241,6 +272,7 @@ void ApplyAspectAndCameraPatches() {
 	// configuration tool: extra aspect entries + auto-select from resolution
 	Memory::Patch(0x45642F, &pSendDlgItemMessageAHooked);
 	Memory::PatchRelative(Memory::JMP, 0x455C80, &GetAspectRatioForSetup);
+	Memory::PatchRelative(Memory::JMP, 0x456066, &AspectLabelASM);
 
 	// aspect switch: allow indices 4/5, then always override with the resolution's aspect
 	Memory::Patch<uint8_t>(0x45741D + 2, 5);
