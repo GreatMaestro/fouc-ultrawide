@@ -3,6 +3,8 @@
 Proper ultrawide support (21:9, 32:9 and anything wider than 16:9) for **FlatOut: Ultimate Carnage — Collector's Edition** on Steam.
 It's a single ASI plugin: the 3D view becomes Hor+, and every menu, HUD element, dialog and video keeps its correct proportions instead of being stretched.
 
+Also on Steam: [FOUC Ultrawide guide](https://steamcommunity.com/sharedfiles/filedetails/?id=3844778000).
+
 ![FlatOut: Ultimate Carnage at 5120x1440](docs/screenshot.jpg)
 
 ## Features
